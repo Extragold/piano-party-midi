@@ -8,7 +8,8 @@ func packetKeys(_ kind: Int, _ channel: Int, _ note: Int, _ value: Int) -> [Int]
     let checksum = digits.enumerated().reduce(0) { $0 + ($1.offset + 1) * $1.element } % 12
     return [13] + digits.map { $0 + 1 } + [checksum + 1, 15]
 }
-let functionKeys: [CGKeyCode] = [122,120,99,118,96,97,98,100,101,109,103,111,105,107,113]
+// Plain letter keys only: G H J K L Z X C V B N M U Y P.
+let carrierKeys: [CGKeyCode] = [5,4,38,40,37,6,7,8,9,11,45,46,32,16,35]
 
 final class Companion: NSObject, NSApplicationDelegate {
     var window: NSWindow!
@@ -88,9 +89,12 @@ final class Companion: NSObject, NSApplicationDelegate {
     }
     func send(_ kind: Int, _ channel: Int, _ note: Int, _ value: Int) {
         guard robloxFocused(), AXIsProcessTrusted() else { return }
+        // Do not combine carrier keys with a modifier the user is holding.
+        let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        guard CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty else { return }
         if kind != 4 && !enabled { return }
         for key in packetKeys(kind,channel,note,value) {
-            let code = functionKeys[key-1]
+            let code = carrierKeys[key-1]
             guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true), let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else { return }
             down.flags = []; up.flags = []; down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
         }

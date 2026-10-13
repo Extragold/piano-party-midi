@@ -23,5 +23,5 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 PLIST
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"
-xcrun lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/PianoPartyMidi"
+xcrun lipo "$app/Contents/MacOS/PianoPartyMidi" -verify_arch arm64 x86_64
 printf 'Built: %s\n' "$app"

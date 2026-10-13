@@ -30,10 +30,14 @@ final class Companion: NSObject, NSApplicationDelegate {
     var sysex = false
     var received = 0
     var sent = 0
+    var dropped = 0
+    var lastRawVelocity = 0
+    var lastSentVelocity = 0
+    var maxQueueMs = 0.0
     var timer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 520), styleMask: [.titled,.closable,.miniaturizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680), styleMask: [.titled,.closable,.miniaturizable], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
         window.title = "Piano Party MIDI — prototype"
         window.backgroundColor = NSColor(calibratedRed: 10/255, green: 13/255, blue: 18/255, alpha: 1)
@@ -65,7 +69,9 @@ final class Companion: NSObject, NSApplicationDelegate {
                 let data = Array(UnsafeBufferPointer(start: bytes, count: Int(packet.pointee.length)))
                 let receivedAt = ProcessInfo.processInfo.systemUptime
                 owner.queue.async {
-                    if ProcessInfo.processInfo.systemUptime - receivedAt > 0.1 { owner.send(4,0,0,0); return }
+                    let delay = ProcessInfo.processInfo.systemUptime - receivedAt
+                    owner.maxQueueMs = max(owner.maxQueueMs, delay * 1000)
+                    if delay > 0.1 { owner.dropped += 1; owner.running = 0; owner.pending = []; owner.send(4,0,0,0); return }
                     owner.read(data)
                 }
                 packet = UnsafePointer(MIDIPacketNext(packet))
@@ -77,7 +83,7 @@ final class Companion: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.queue.async {
                 if self.enabled { self.send(5,0,0,0) }
-                let text = "\(self.enabled ? (self.robloxFocused() ? "Sending to Roblox" : "Armed — focus Roblox") : "Stopped")\nMIDI messages: \(self.received) · Packets sent: \(self.sent)"
+                let text = "\(self.enabled ? (self.robloxFocused() ? "Sending to Roblox" : "Armed — focus Roblox") : "Stopped")\nMIDI messages: \(self.received) · Packets sent: \(self.sent)\nVelocity raw/encoded: \(self.lastRawVelocity)/\(self.lastSentVelocity)\nApp queue max: \(Int(self.maxQueueMs)) ms · Dropped: \(self.dropped)"
                 DispatchQueue.main.async { self.status.stringValue = text }
             }
         }
@@ -118,6 +124,7 @@ final class Companion: NSObject, NSApplicationDelegate {
             if type == 0x90 && a >= 21 && a <= 108 {
                 let exponent = curve == 1 ? 0.7 : curve == 2 ? 1.4 : 1.0
                 let velocity = b == 0 ? 0 : max(1,min(127,Int((pow(Double(b)/127,exponent)*127).rounded())))
+                if b > 0 { lastRawVelocity = b; lastSentVelocity = velocity }
                 send(b == 0 ? 1 : 0,channel,a,velocity)
             } else if type == 0x80 && a >= 21 && a <= 108 { send(1,channel,a,max(1,b))
             } else if type == 0xB0 {

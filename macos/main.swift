@@ -119,7 +119,7 @@ final class Companion: NSObject, NSApplicationDelegate {
                 let exponent = curve == 1 ? 0.7 : curve == 2 ? 1.4 : 1.0
                 let velocity = b == 0 ? 0 : max(1,min(127,Int((pow(Double(b)/127,exponent)*127).rounded())))
                 send(b == 0 ? 1 : 0,channel,a,velocity)
-            } else if type == 0x80 && a >= 21 && a <= 108 { send(1,channel,a,0)
+            } else if type == 0x80 && a >= 21 && a <= 108 { send(1,channel,a,max(1,b))
             } else if type == 0xB0 {
                 if a == 64 { send(2,channel,0,b) } else if a == 67 { send(3,channel,0,b) } else if a == 120 || a == 123 { send(4,0,0,0) }
             }

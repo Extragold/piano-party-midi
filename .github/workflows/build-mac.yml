@@ -1,0 +1,24 @@
+name: Build Mac app
+on:
+  push:
+    paths:
+      - 'macos/**'
+      - '.github/workflows/build-mac.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal Mac app
+        run: bash macos/build.sh
+      - name: Package app
+        run: ditto -c -k --sequesterRsrc --keepParent 'dist/macos/Piano Party MIDI.app' 'dist/PianoPartyMidi-Mac.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PianoPartyMidi-Mac
+          path: dist/PianoPartyMidi-Mac.zip
+          if-no-files-found: error

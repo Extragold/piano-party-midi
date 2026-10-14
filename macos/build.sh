@@ -16,7 +16,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>PianoPartyMidi</string>
 <key>CFBundleIdentifier</key><string>com.pianoparty.midicompanion</string>
 <key>CFBundleName</key><string>Piano Party MIDI</string>
-<key>CFBundleVersion</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>0.3.0</string>
+<key>CFBundleShortVersionString</key><string>0.3.0</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

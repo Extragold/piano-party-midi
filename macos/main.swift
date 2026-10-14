@@ -16,6 +16,7 @@ final class Companion: NSObject, NSApplicationDelegate {
     let devices = NSPopUpButton(frame: .zero)
     let curves = NSPopUpButton(frame: .zero)
     let armed = NSButton(checkboxWithTitle: "Send to Piano Party", target: nil, action: nil)
+    let direct = NSButton(checkboxWithTitle: "Direct app delivery (test; turn off if no notes arrive)", target: nil, action: nil)
     let status = NSTextField(wrappingLabelWithString: "Stopped")
     let queue = DispatchQueue(label: "piano-party-midi-send", qos: .userInteractive)
     var client: MIDIClientRef = 0
@@ -25,6 +26,7 @@ final class Companion: NSObject, NSApplicationDelegate {
     // The following state is owned by the serial sending queue.
     var enabled = false
     var curve = 0
+    var directDelivery = true
     var running: UInt8 = 0
     var pending: [UInt8] = []
     var sysex = false
@@ -35,11 +37,12 @@ final class Companion: NSObject, NSApplicationDelegate {
     var lastSentVelocity = 0
     var maxQueueMs = 0.0
     var timer: Timer?
+    var liveActivity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680), styleMask: [.titled,.closable,.miniaturizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 720), styleMask: [.titled,.closable,.miniaturizable], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
-        window.title = "Piano Party MIDI — prototype"
+        window.title = "Piano Party MIDI — v0.3 input test"
         window.backgroundColor = NSColor(calibratedRed: 10/255, green: 13/255, blue: 18/255, alpha: 1)
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -52,6 +55,7 @@ final class Companion: NSObject, NSApplicationDelegate {
         let refresh = NSButton(title: "Refresh devices", target: self, action: #selector(refreshDevices)); stack.addArrangedSubview(refresh)
         stack.addArrangedSubview(NSTextField(labelWithString: "Velocity curve")); curves.addItems(withTitles: ["Linear", "Softer touch", "Harder touch"]); curves.target = self; curves.action = #selector(changeCurve); stack.addArrangedSubview(curves)
         armed.target = self; armed.action = #selector(changeArmed); stack.addArrangedSubview(armed)
+        direct.state = .on; direct.target = self; direct.action = #selector(changeDelivery); stack.addArrangedSubview(direct)
         stack.addArrangedSubview(status)
         stack.addArrangedSubview(NSButton(title: "Stop / release notes", target: self, action: #selector(stop)))
         stack.addArrangedSubview(NSButton(title: "Test C4 in 3 seconds", target: self, action: #selector(testNote)))
@@ -82,7 +86,10 @@ final class Companion: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.queue.async {
-                if self.enabled { self.send(5,0,0,0) }
+                if self.enabled {
+                    let tick = Int(ProcessInfo.processInfo.systemUptime * 100) % 16384
+                    self.send(5,0,tick / 128,tick % 128)
+                }
                 let text = "\(self.enabled ? (self.robloxFocused() ? "Sending to Roblox" : "Armed — focus Roblox") : "Stopped")\nMIDI messages: \(self.received) · Packets sent: \(self.sent)\nVelocity raw/encoded: \(self.lastRawVelocity)/\(self.lastSentVelocity)\nApp queue max: \(Int(self.maxQueueMs)) ms · Dropped: \(self.dropped)"
                 DispatchQueue.main.async { self.status.stringValue = text }
             }
@@ -99,10 +106,13 @@ final class Companion: NSObject, NSApplicationDelegate {
         let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
         guard CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty else { return }
         if kind != 4 && !enabled { return }
+        guard let target = NSWorkspace.shared.frontmostApplication else { return }
         for key in packetKeys(kind,channel,note,value) {
             let code = carrierKeys[key-1]
             guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true), let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else { return }
-            down.flags = []; up.flags = []; down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+            down.flags = []; up.flags = []
+            if directDelivery { down.postToPid(target.processIdentifier); up.postToPid(target.processIdentifier) }
+            else { down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap) }
         }
         sent += 1
     }
@@ -152,9 +162,16 @@ final class Companion: NSObject, NSApplicationDelegate {
         if result != noErr { status.stringValue = "Could not connect MIDI source (\(result))." }
         queue.async { self.running = 0; self.pending = [] }
     }
-    @objc func changeArmed() { let value = armed.state == .on; queue.async { self.enabled = value; if !value { self.send(4,0,0,0) } } }
+    func setLiveActivity(_ active: Bool) {
+        if let token = liveActivity { ProcessInfo.processInfo.endActivity(token); liveActivity = nil }
+        if active {
+            liveActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Live MIDI performance into Piano Party")
+        }
+    }
+    @objc func changeArmed() { let value = armed.state == .on; setLiveActivity(value); queue.async { self.enabled = value; if !value { self.send(4,0,0,0) } } }
     @objc func changeCurve() { let value = curves.indexOfSelectedItem; queue.async { self.curve = value } }
-    @objc func stop() { armed.state = .off; queue.async { self.enabled = false; self.send(4,0,0,0) } }
+    @objc func changeDelivery() { let value = direct.state == .on; queue.async { self.send(4,0,0,0);self.directDelivery = value } }
+    @objc func stop() { armed.state = .off; setLiveActivity(false); queue.async { self.enabled = false; self.send(4,0,0,0) } }
     @objc func accessibility() { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
     @objc func testNote() {
         queue.asyncAfter(deadline: .now()+3) { self.send(0,0,60,40) }
@@ -165,6 +182,7 @@ final class Companion: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate(); queue.sync { self.enabled = false; self.send(4,0,0,0) }
+        setLiveActivity(false)
         if port != 0 { MIDIPortDispose(port) }; if client != 0 { MIDIClientDispose(client) }
     }
 }
